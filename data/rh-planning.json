@@ -1,0 +1,87 @@
+{
+  "intervenants": [
+    {
+      "id": "int_001",
+      "prenom": "Sofia",
+      "nom": "Martin",
+      "email": "sofia.martin@example.com",
+      "telephone": "0600000001",
+      "statut": "disponible",
+      "specialites": [
+        "chauffage",
+        "maintenance"
+      ],
+      "couleur": "#3b82f6"
+    },
+    {
+      "id": "int_002",
+      "prenom": "Liam",
+      "nom": "Bernard",
+      "email": "liam.bernard@example.com",
+      "telephone": "0600000002",
+      "statut": "en_intervention",
+      "specialites": [
+        "electricite"
+      ],
+      "couleur": "#10b981"
+    },
+    {
+      "id": "int_003",
+      "prenom": "Nora",
+      "nom": "Petit",
+      "email": "nora.petit@example.com",
+      "telephone": "0600000003",
+      "statut": "conge",
+      "specialites": [
+        "plomberie"
+      ],
+      "couleur": "#f59e0b"
+    }
+  ],
+  "interventions": [
+    {
+      "id": "iv_001",
+      "client_nom": "Boulangerie du Centre",
+      "date_intervention": "2026-03-10T08:00:00.000Z",
+      "duree_minutes": 120,
+      "statut": "planifiee",
+      "intervenant_id": "int_001",
+      "adresse": "10 Rue de la Republique, Paris",
+      "notes": "Controle annuel.",
+      "created_at": "2026-03-09T10:00:00.000Z"
+    },
+    {
+      "id": "iv_002",
+      "client_nom": "Residence Horizon",
+      "date_intervention": "2026-03-10T09:30:00.000Z",
+      "duree_minutes": 90,
+      "statut": "en_cours",
+      "intervenant_id": "int_002",
+      "adresse": "22 Avenue Victor Hugo, Lyon",
+      "notes": "Panne tableau electrique.",
+      "created_at": "2026-03-09T10:15:00.000Z"
+    },
+    {
+      "id": "iv_57c7b113",
+      "client_nom": "Clinique Est",
+      "date_intervention": "2026-03-10T13:00:00.000Z",
+      "duree_minutes": 60,
+      "statut": "planifiee",
+      "intervenant_id": "int_001",
+      "adresse": "5 Rue Nationale, Lille",
+      "notes": "Visite preventive",
+      "created_at": "2026-03-09T11:36:30.246Z"
+    },
+    {
+      "id": "iv_d6737053",
+      "client_nom": "Test Source",
+      "date_intervention": "2026-03-11T10:00:00.000Z",
+      "duree_minutes": 45,
+      "statut": "planifiee",
+      "intervenant_id": "int_001",
+      "adresse": "",
+      "notes": "",
+      "created_at": "2026-03-09T11:44:42.436Z"
+    }
+  ]
+}
