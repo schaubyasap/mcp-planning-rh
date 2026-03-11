@@ -145,6 +145,10 @@ function hasOverlap(a, b) {
   return a.start < b.end && b.start < a.end;
 }
 
+function getPointageDateValue(item) {
+  return item?.date_pointage || item?.horodatage || item?.created_date || null;
+}
+
 let base44Client;
 const sseTransports = {};
 
@@ -425,21 +429,25 @@ async function listPointagesData({
     const cappedLimit = Math.min(Math.max(limit, 1), 5000);
     pointages =
       Object.keys(query).length > 0
-        ? await entity.filter(query, "date_pointage", cappedLimit)
-        : await entity.list("date_pointage", cappedLimit);
+        ? await entity.filter(query, "created_date", cappedLimit)
+        : await entity.list("created_date", cappedLimit);
   }
 
   return pointages
     .filter((item) => !intervenant_id || item.intervenant_id === intervenant_id)
     .filter((item) => !intervention_id || item.intervention_id === intervention_id)
     .filter((item) => {
-      const ts = new Date(item.date_pointage).getTime();
+      const ts = new Date(getPointageDateValue(item)).getTime();
       if (Number.isNaN(ts)) return false;
       if (fromTs !== null && ts < fromTs) return false;
       if (toTs !== null && ts > toTs) return false;
       return true;
     })
-    .sort((a, b) => new Date(a.date_pointage).getTime() - new Date(b.date_pointage).getTime())
+    .sort(
+      (a, b) =>
+        new Date(getPointageDateValue(a)).getTime() -
+        new Date(getPointageDateValue(b)).getTime(),
+    )
     .slice(0, limit);
 }
 
@@ -475,7 +483,9 @@ async function createPointageData({
       intervenant_id,
       intervention_id: intervention_id || "",
       date_pointage: new Date(pointageTs).toISOString(),
+      horodatage: new Date(pointageTs).toISOString(),
       action: action || "",
+      type: action || "",
       notes: notes || "",
       created_at: new Date().toISOString(),
     };
@@ -497,7 +507,9 @@ async function createPointageData({
     intervenant_id,
     intervention_id: intervention_id || "",
     date_pointage: new Date(pointageTs).toISOString(),
+    horodatage: new Date(pointageTs).toISOString(),
     action: action || "",
+    type: action || "",
     notes: notes || "",
   });
 }
