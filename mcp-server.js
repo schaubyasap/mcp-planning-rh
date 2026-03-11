@@ -4,6 +4,7 @@ const { McpServer } = require("@modelcontextprotocol/sdk/server/mcp.js");
 const {
   StreamableHTTPServerTransport,
 } = require("@modelcontextprotocol/sdk/server/streamableHttp.js");
+const { SSEServerTransport } = require("@modelcontextprotocol/sdk/server/sse.js");
 const { createMcpExpressApp } = require("@modelcontextprotocol/sdk/server/express.js");
 const { z } = require("zod");
 const { randomUUID, timingSafeEqual } = require("node:crypto");
@@ -36,6 +37,13 @@ const base44InterventionEntity =
   process.env.BASE44_INTERVENTION_ENTITY || "Intervention";
 const forcedDataSource = (process.env.DATA_SOURCE || "").toLowerCase();
 const mcpSharedSecret = process.env.MCP_SHARED_SECRET || "";
+const runtimeEnv = (process.env.NODE_ENV || "").toLowerCase();
+const rawDisableMcpAuth =
+  process.env.DISABLE_MCP_AUTH ?? process.env.DISABLE_MCP_AUTH_IN_DEV;
+const disableMcpAuth =
+  rawDisableMcpAuth != null
+    ? String(rawDisableMcpAuth).toLowerCase() !== "false"
+    : runtimeEnv !== "production";
 
 const defaultStore = {
   intervenants: [
@@ -135,6 +143,7 @@ function hasOverlap(a, b) {
 }
 
 let base44Client;
+const sseTransports = {};
 
 function getDataSource() {
   if (forcedDataSource === "local") return "local";
@@ -639,6 +648,7 @@ function matchesSecret(value) {
 }
 
 function isAuthorized(req) {
+  if (disableMcpAuth) return true;
   if (!mcpSharedSecret) return true;
 
   const direct =
@@ -670,7 +680,7 @@ app.get("/", (_req, res) => {
   res.status(200).json({ status: "ok", service: "mcp-server" });
 });
 
-app.use("/mcp", (req, res, next) => {
+app.use(["/mcp", "/sse", "/messages"], (req, res, next) => {
   if (req.method === "OPTIONS") return next();
 
   if (!isAuthorized(req)) {
@@ -685,6 +695,14 @@ app.use("/mcp", (req, res, next) => {
 });
 
 app.options("/mcp", (_req, res) => {
+  res.status(204).end();
+});
+
+app.options("/sse", (_req, res) => {
+  res.status(204).end();
+});
+
+app.options("/messages", (_req, res) => {
   res.status(204).end();
 });
 
@@ -727,6 +745,64 @@ app.get("/mcp", async (req, res) => {
   });
 });
 
+// Legacy MCP HTTP+SSE transport compatibility for clients expecting text/event-stream.
+app.get("/sse", async (_req, res) => {
+  try {
+    const transport = new SSEServerTransport("/messages", res);
+    sseTransports[transport.sessionId] = transport;
+
+    res.on("close", () => {
+      delete sseTransports[transport.sessionId];
+    });
+
+    const server = createServer();
+    await server.connect(transport);
+
+    transport.onclose = async () => {
+      delete sseTransports[transport.sessionId];
+      await server.close();
+    };
+  } catch (error) {
+    console.error("SSE init error:", error);
+    if (!res.headersSent) {
+      res.status(500).json({
+        jsonrpc: "2.0",
+        error: { code: -32603, message: "Internal server error" },
+        id: null,
+      });
+    }
+  }
+});
+
+app.post("/messages", async (req, res) => {
+  const sessionId = req.query.sessionId;
+  const transport = sessionId ? sseTransports[sessionId] : undefined;
+
+  if (!transport) {
+    return res.status(400).json({
+      jsonrpc: "2.0",
+      error: {
+        code: -32000,
+        message: "Bad Request: No SSE transport found for sessionId",
+      },
+      id: null,
+    });
+  }
+
+  try {
+    await transport.handlePostMessage(req, res, req.body);
+  } catch (error) {
+    console.error("SSE message error:", error);
+    if (!res.headersSent) {
+      res.status(500).json({
+        jsonrpc: "2.0",
+        error: { code: -32603, message: "Internal server error" },
+        id: null,
+      });
+    }
+  }
+});
+
 app.delete("/mcp", async (req, res) => {
   res.status(405).json({
     jsonrpc: "2.0",
@@ -743,4 +819,11 @@ app.listen(port, (error) => {
   }
 
   console.log(`MCP local server running at http://localhost:${port}/mcp`);
+  if (disableMcpAuth) {
+    console.log(
+      "MCP auth disabled (set DISABLE_MCP_AUTH=false to enforce auth).",
+    );
+  } else {
+    console.log("MCP auth enabled.");
+  }
 });
