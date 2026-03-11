@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: asap4064-mcp
+    name: asap4064-mcp-planning
     env: node
     autoDeploy: true
     buildCommand: npm ci
@@ -21,5 +21,34 @@ services:
         value: Intervenant
       - key: BASE44_INTERVENTION_ENTITY
         value: Intervention
+      - key: BASE44_POINTAGE_ENTITY
+        value: Pointage
+      - key: MCP_SHARED_SECRET
+        sync: false
+
+  - type: web
+    name: asap4064-mcp-pointage
+    env: node
+    autoDeploy: true
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: DATA_SOURCE
+        value: base44
+      - key: BASE44_SERVER_URL
+        value: https://base44.app
+      - key: BASE44_APP_ID
+        sync: false
+      - key: BASE44_TOKEN
+        sync: false
+      - key: BASE44_INTERVENANT_ENTITY
+        value: Intervenant
+      - key: BASE44_INTERVENTION_ENTITY
+        value: Intervention
+      - key: BASE44_POINTAGE_ENTITY
+        value: Pointage
       - key: MCP_SHARED_SECRET
         sync: false

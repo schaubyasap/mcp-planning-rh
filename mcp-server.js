@@ -35,6 +35,7 @@ const base44IntervenantEntity =
   process.env.BASE44_INTERVENANT_ENTITY || "Intervenant";
 const base44InterventionEntity =
   process.env.BASE44_INTERVENTION_ENTITY || "Intervention";
+const base44PointageEntity = process.env.BASE44_POINTAGE_ENTITY || "Pointage";
 const forcedDataSource = (process.env.DATA_SOURCE || "").toLowerCase();
 const mcpSharedSecret = process.env.MCP_SHARED_SECRET || "";
 const runtimeEnv = (process.env.NODE_ENV || "").toLowerCase();
@@ -102,6 +103,7 @@ const defaultStore = {
       created_at: "2026-03-09T10:15:00.000Z",
     },
   ],
+  pointages: [],
 };
 
 function ensureStore() {
@@ -121,6 +123,7 @@ function readStore() {
   return {
     intervenants: Array.isArray(parsed.intervenants) ? parsed.intervenants : [],
     interventions: Array.isArray(parsed.interventions) ? parsed.interventions : [],
+    pointages: Array.isArray(parsed.pointages) ? parsed.pointages : [],
   };
 }
 
@@ -178,7 +181,7 @@ function getEntity(client, entityName) {
   const handler = client.entities?.[entityName];
   if (!handler) {
     throw new Error(
-      `Entite Base44 introuvable: ${entityName}. Verifie BASE44_INTERVENANT_ENTITY / BASE44_INTERVENTION_ENTITY.`,
+      `Entite Base44 introuvable: ${entityName}. Verifie BASE44_INTERVENANT_ENTITY / BASE44_INTERVENTION_ENTITY / BASE44_POINTAGE_ENTITY.`,
     );
   }
   return handler;
@@ -392,6 +395,113 @@ async function createInterventionData({
   return { intervention, intervenant };
 }
 
+async function listPointagesData({
+  date_from,
+  date_to,
+  intervenant_id,
+  intervention_id,
+  limit,
+}) {
+  const fromTs = date_from ? new Date(date_from).getTime() : null;
+  const toTs = date_to ? new Date(date_to).getTime() : null;
+
+  if (date_from && Number.isNaN(fromTs)) {
+    throw new Error("date_from invalide. Utilise un format ISO date.");
+  }
+  if (date_to && Number.isNaN(toTs)) {
+    throw new Error("date_to invalide. Utilise un format ISO date.");
+  }
+
+  let pointages;
+  if (getDataSource() === "local") {
+    const store = readStore();
+    pointages = store.pointages;
+  } else {
+    const client = getBase44Client();
+    const entity = getEntity(client, base44PointageEntity);
+    const query = {};
+    if (intervenant_id) query.intervenant_id = intervenant_id;
+    if (intervention_id) query.intervention_id = intervention_id;
+    const cappedLimit = Math.min(Math.max(limit, 1), 5000);
+    pointages =
+      Object.keys(query).length > 0
+        ? await entity.filter(query, "date_pointage", cappedLimit)
+        : await entity.list("date_pointage", cappedLimit);
+  }
+
+  return pointages
+    .filter((item) => !intervenant_id || item.intervenant_id === intervenant_id)
+    .filter((item) => !intervention_id || item.intervention_id === intervention_id)
+    .filter((item) => {
+      const ts = new Date(item.date_pointage).getTime();
+      if (Number.isNaN(ts)) return false;
+      if (fromTs !== null && ts < fromTs) return false;
+      if (toTs !== null && ts > toTs) return false;
+      return true;
+    })
+    .sort((a, b) => new Date(a.date_pointage).getTime() - new Date(b.date_pointage).getTime())
+    .slice(0, limit);
+}
+
+async function createPointageData({
+  intervenant_id,
+  intervention_id,
+  date_pointage,
+  action,
+  notes,
+}) {
+  const datePointage = date_pointage || new Date().toISOString();
+  const pointageTs = new Date(datePointage).getTime();
+  if (Number.isNaN(pointageTs)) {
+    throw new Error("date_pointage invalide. Utilise un format ISO date.");
+  }
+
+  if (getDataSource() === "local") {
+    const store = readStore();
+    const intervenant = store.intervenants.find((it) => it.id === intervenant_id);
+    if (!intervenant) {
+      throw new Error(`Intervenant introuvable: ${intervenant_id}`);
+    }
+
+    if (
+      intervention_id &&
+      !store.interventions.find((it) => it.id === intervention_id)
+    ) {
+      throw new Error(`Intervention introuvable: ${intervention_id}`);
+    }
+
+    const pointage = {
+      id: `pt_${randomUUID().slice(0, 8)}`,
+      intervenant_id,
+      intervention_id: intervention_id || "",
+      date_pointage: new Date(pointageTs).toISOString(),
+      action: action || "",
+      notes: notes || "",
+      created_at: new Date().toISOString(),
+    };
+    store.pointages.push(pointage);
+    writeStore(store);
+    return pointage;
+  }
+
+  const client = getBase44Client();
+  const intervenantEntity = getEntity(client, base44IntervenantEntity);
+  const pointageEntity = getEntity(client, base44PointageEntity);
+
+  const intervenant = await intervenantEntity.get(intervenant_id);
+  if (!intervenant) {
+    throw new Error(`Intervenant introuvable: ${intervenant_id}`);
+  }
+
+  return pointageEntity.create({
+    intervenant_id,
+    intervention_id: intervention_id || "",
+    date_pointage: new Date(pointageTs).toISOString(),
+    action: action || "",
+    notes: notes || "",
+  });
+}
+
 function createServer() {
   const server = new McpServer(
     {
@@ -474,6 +584,7 @@ function createServer() {
         base44_server_url: base44ServerUrl,
         base44_intervenant_entity: base44IntervenantEntity,
         base44_intervention_entity: base44InterventionEntity,
+        base44_pointage_entity: base44PointageEntity,
       };
 
       return {
@@ -616,6 +727,93 @@ function createServer() {
           source: getDataSource(),
           created: true,
           intervention,
+        },
+      };
+    },
+  );
+
+  server.registerTool(
+    "pointage_list",
+    {
+      description:
+        "Use this when you need to read pointage entries with optional date, intervention, or intervenant filters.",
+      inputSchema: {
+        date_from: z.string().optional(),
+        date_to: z.string().optional(),
+        intervenant_id: z.string().optional(),
+        intervention_id: z.string().optional(),
+        limit: z.number().int().min(1).max(500).default(100),
+      },
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async ({ date_from, date_to, intervenant_id, intervention_id, limit }) => {
+      const pointages = await listPointagesData({
+        date_from,
+        date_to,
+        intervenant_id,
+        intervention_id,
+        limit,
+      });
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `${pointages.length} pointage(s) trouve(s) [source: ${getDataSource()}].`,
+          },
+        ],
+        structuredContent: {
+          source: getDataSource(),
+          count: pointages.length,
+          pointages,
+        },
+      };
+    },
+  );
+
+  server.registerTool(
+    "pointage_create",
+    {
+      description:
+        "Use this when you need to create a pointage event linked to an intervenant and optionally an intervention.",
+      inputSchema: {
+        intervenant_id: z.string(),
+        intervention_id: z.string().optional(),
+        date_pointage: z.string().optional(),
+        action: z.string().optional(),
+        notes: z.string().optional(),
+      },
+      annotations: {
+        readOnlyHint: false,
+        idempotentHint: false,
+        destructiveHint: false,
+        openWorldHint: false,
+      },
+    },
+    async ({ intervenant_id, intervention_id, date_pointage, action, notes }) => {
+      const pointage = await createPointageData({
+        intervenant_id,
+        intervention_id,
+        date_pointage,
+        action,
+        notes,
+      });
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Pointage ${pointage.id} cree [source: ${getDataSource()}].`,
+          },
+        ],
+        structuredContent: {
+          source: getDataSource(),
+          created: true,
+          pointage,
         },
       };
     },
